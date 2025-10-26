@@ -428,8 +428,6 @@ def _angles_to_obs(angles_deg):
 
 def _window_entropy_at_theta(music_norm, theta_grid, theta, half_win=1):
     """
-    对单个假角周围 ±half_win 个网格点取一个小分布来计算熵；
-    d_f=1 时单点熵为0，这样能给奖励更多信息（可选，默认 half_win=1）。
     """
     idx = int(np.argmin(np.abs(theta_grid - theta)))
     lo = max(0, idx - half_win)
@@ -443,7 +441,6 @@ class FakeAoAEnv(gym.Env):
     """
     单步环境：动作是在 theta_grid 上选一个假 AoA（离散动作）。
     奖励 = -(real_peak_sum - lambda_weight_fake * entropy_fake_window)
-    其余所有物理与计算都直接复用你已有的代码与变量。
     """
     metadata = {"render_modes": []}
 
@@ -481,7 +478,7 @@ class FakeAoAEnv(gym.Env):
         return obs, {}
 
     def step(self, action):
-        # 把离散索引 -> 假 AoA（本环境 d_f=1；若将来 d_f>1，可扩展为多动作）
+       
         fake_theta = float(self.theta_grid[int(action)])
         fake_aoas = [fake_theta]
 
@@ -499,12 +496,12 @@ class FakeAoAEnv(gym.Env):
             idx = int(np.argmin(np.abs(self.theta_grid - th)))
             real_peak_sum += float(music_norm[idx])
 
-        # 假角的“窗口熵”（给 d_f=1 时的熵一丢丢可辨识度；可把 halfwin=0 退化回原始单点）
+        
         entropy_fake = _window_entropy_at_theta(music_norm, self.theta_grid,
                                                 fake_theta, half_win=self.entropy_halfwin)
 
         objective = real_peak_sum - self.lambda_weight_fake * entropy_fake
-        reward = -objective  # 想最大化 -> 负号
+        reward = -objective  
 
         obs = _angles_to_obs(self.real_aoas)
         info = dict(fake_aoa=fake_theta,
@@ -516,8 +513,7 @@ class FakeAoAEnv(gym.Env):
         return obs, reward, terminated, truncated, info
 
 # 1) 复用你已计算好的 real_Peff / fake_Peff（含 pathloss），以及 real_aoas 等
-#    注意：real_Peff, fake_Peff 是在你上面的随机搜索循环里计算的，
-#    为了把环境做成“可重用”，建议把下面两行移到循环前计算一次即可。
+
 real_Peff_env = (1.0 * np.ones_like(real_dist)) / np.maximum(real_dist, 1e-12)  # 等同你循环内的写法
 fake_Peff_env = (1.0 * np.ones_like(fake_dist)) / np.maximum(fake_dist, 1e-12)
 
