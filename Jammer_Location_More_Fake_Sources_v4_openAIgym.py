@@ -28,7 +28,7 @@ center = np.array([Lroom, Wroom], dtype=float)
 rng = np.random.default_rng()  # 可加种子 rng = np.random.default_rng(123)
 
 for k0 in range(K):
-    # 正确的“圆盘内均匀采样”：r = R * sqrt(U), angle ~ U[0, 2π]
+    # 圆盘内均匀采样：r = R * sqrt(U), angle ~ U[0, 2π]
     r = radius * np.sqrt(rng.uniform(0.0, 1.0))
     angle = rng.uniform(0.0, 2*np.pi)
     offset = np.array([r*np.cos(angle), r*np.sin(angle)], dtype=float)
@@ -47,7 +47,7 @@ ax.axvline(0, linewidth=0.8)
 ax.scatter([jammer_location[0]], [jammer_location[1]],
            marker='s', s=100, label='ULA (jammer center)')
 
-# real / fake 节点（按你 nodes_xy 的拆分方式：前 d_r 是 real，后 d_f 是 fake）
+# real / fake 节点（按 nodes_xy 的拆分方式：前 d_r 是 real，后 d_f 是 fake）
 real_location = nodes_xy[:d_r, :]
 fake_location = nodes_xy[d_r:, :]
 
@@ -63,7 +63,6 @@ circle_y = Wroom + radius * np.sin(theta)
 ax.plot(circle_x, circle_y, linewidth=1.0, label='Sampling circle')
 ax.scatter([Lroom], [Wroom], marker='+', s=80, label='Circle center')
 
-# 外观
 ax.set_aspect('equal', adjustable='box')
 ax.set_xlabel('x (m)')
 ax.set_ylabel('y (m)')
@@ -71,7 +70,7 @@ ax.set_title('Global frame: ULA (jammer), real/fake nodes and sampling circle')
 ax.grid(True)
 ax.legend(loc='best')
 plt.tight_layout()
-#plt.show()
+plt.show()
 
 # 1) 定义：全局 -> 阵列坐标（阵列=jammer 在 jammer_location）
 ARRAY_CENTER_GLOBAL = np.array(jammer_location, dtype=float)
@@ -102,7 +101,7 @@ jammer_x, jammer_y = jammer_location
 real_dist = np.hypot(real_location[:, 0] - jammer_x,
                      real_location[:, 1] - jammer_y)      # shape: (d_r,)
 
-# fake 的直线距离（你 d_f = 1）
+# fake 的直线距离（d_f = 1）
 fake_dist = np.hypot(fake_location[:, 0] - jammer_x,
                          fake_location[:, 1] - jammer_y)   # shape: (d_f,)
 print("Real distances to ULA (m):", real_dist)
@@ -318,7 +317,7 @@ plt.scatter(best_fake_aoas, [music_spectrum_final[np.argmin(np.abs(theta_grid - 
 # plt.show()
 
 # Set font sizes for labels and title
-plt.title('MUSIC Spectrum with Optimized 8 Fake AoAs (Random Grid Search)', fontsize=16)
+plt.title('MUSIC Spectrum with Optimized 1 Fake AoAs (Random Grid Search)', fontsize=16)
 plt.xlabel('Angle (degrees)', fontsize=14)
 plt.ylabel('Normalized Spectrum Value', fontsize=14)
 
@@ -428,7 +427,11 @@ def _angles_to_obs(angles_deg):
 
 def _window_entropy_at_theta(music_norm, theta_grid, theta, half_win=1):
     """
+    对单个假角周围 ±half_win 个网格点取一个小分布来计算熵；
+    d_f=1 时单点熵为0，这样能给奖励更多信息（可选，默认 half_win=1）。
     """
+    #Music_norm 是归一化的MUSIC spectrum
+    #Theta是当前的fake AoA
     idx = int(np.argmin(np.abs(theta_grid - theta)))
     lo = max(0, idx - half_win)
     hi = min(len(theta_grid) - 1, idx + half_win)
@@ -441,6 +444,7 @@ class FakeAoAEnv(gym.Env):
     """
     单步环境：动作是在 theta_grid 上选一个假 AoA（离散动作）。
     奖励 = -(real_peak_sum - lambda_weight_fake * entropy_fake_window)
+    其余所有物理与计算都直接复用已有的代码与变量。
     """
     metadata = {"render_modes": []}
 
@@ -449,7 +453,7 @@ class FakeAoAEnv(gym.Env):
                  M, d_total, sigma2,
                  real_aoas,          # list[deg]
                  real_Peff,          # shape=(d_r,)
-                 fake_Peff,          # shape=(d_f,)  — 你目前 d_f=1
+                 fake_Peff,          # shape=(d_f,)  — 目前 d_f=1
                  d_over_lambda=0.5,
                  lambda_weight_fake=0.1,
                  entropy_halfwin=1):
@@ -478,11 +482,11 @@ class FakeAoAEnv(gym.Env):
         return obs, {}
 
     def step(self, action):
-       
+        # 把离散索引 -> 假 AoA（本环境 d_f=1；若将来 d_f>1，可扩展为多动作）
         fake_theta = float(self.theta_grid[int(action)])
         fake_aoas = [fake_theta]
 
-        # 用 “已含 pathloss 的功率” 进入你原 covariance 计算
+        # 用 “已含 pathloss 的功率” 进入原 covariance 计算
         R = compute_covariance_matrix(self.real_aoas, fake_aoas,
                                       self.M, self.sigma2,
                                       real_power=self.real_Peff,
@@ -496,12 +500,12 @@ class FakeAoAEnv(gym.Env):
             idx = int(np.argmin(np.abs(self.theta_grid - th)))
             real_peak_sum += float(music_norm[idx])
 
-        
+        # 假角的“窗口熵”（给 d_f=1 时的熵一丢丢可辨识度；可把 halfwin=0 退化回原始单点）
         entropy_fake = _window_entropy_at_theta(music_norm, self.theta_grid,
                                                 fake_theta, half_win=self.entropy_halfwin)
 
         objective = real_peak_sum - self.lambda_weight_fake * entropy_fake
-        reward = -objective  
+        reward = -objective  # 想最大化 -> 负号
 
         obs = _angles_to_obs(self.real_aoas)
         info = dict(fake_aoa=fake_theta,
@@ -512,9 +516,9 @@ class FakeAoAEnv(gym.Env):
         truncated  = False
         return obs, reward, terminated, truncated, info
 
-# 1) 复用你已计算好的 real_Peff / fake_Peff（含 pathloss），以及 real_aoas 等
-
-real_Peff_env = (1.0 * np.ones_like(real_dist)) / np.maximum(real_dist, 1e-12)  # 等同你循环内的写法
+# 1) 复用已计算好的 real_Peff / fake_Peff（含 pathloss），以及 real_aoas 等
+#    注意：real_Peff, fake_Peff 是在上面的随机搜索循环里计算的，
+real_Peff_env = (1.0 * np.ones_like(real_dist)) / np.maximum(real_dist, 1e-12)  # 等同循环内的写法
 fake_Peff_env = (1.0 * np.ones_like(fake_dist)) / np.maximum(fake_dist, 1e-12)
 
 env = FakeAoAEnv(theta_grid=theta_grid,
@@ -526,7 +530,7 @@ env = FakeAoAEnv(theta_grid=theta_grid,
                  lambda_weight_fake=0.1,
                  entropy_halfwin=1)
 
-# 随机 agent demo：采 10 次动作看看 reward（你可以换成 SB3 的 PPO/DDPG/TD3）
+# 随机 agent demo：采 10 次动作看看 reward（可以换成 SB3 的 PPO/DDPG/TD3）
 for _ in range(10):
     obs, info = env.reset()
     a = env.action_space.sample()
