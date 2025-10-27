@@ -14,21 +14,21 @@ d_over_lambda = 0.5  # Antenna spacing normalized to wavelength (half-wavelength
 d_total = d_r + d_f  # Total number of sources MUSIC will detect (important!)
 
 # generate location for jammer (global coords)
-jammer_location = (0.0, 0.0)   # 阵列相位中心（GLOBAL）
+jammer_location = (0.0, 0.0)   # ULA center location（GLOBAL）
 
 # generate location for real and fake nodes (GLOBAL coords)
 K = d_r + d_f
-Lroom = 10.0   # 圆心 x
-Wroom = 20.0   # 圆心 y
-radius = 10.0       # 圆半径 (m)
+Lroom = 10.0   # radius x
+Wroom = 20.0   # radius y
+radius = 10.0       # radius distance (m)
 
 nodes_xy = np.zeros((K, 2), dtype=float)
 center = np.array([Lroom, Wroom], dtype=float)
 
-rng = np.random.default_rng()  # 可加种子 rng = np.random.default_rng(123)
+rng = np.random.default_rng()  # can add seed rng = np.random.default_rng(123)
 
 for k0 in range(K):
-    # 圆盘内均匀采样：r = R * sqrt(U), angle ~ U[0, 2π]
+    # uniform sample in the darius：r = R * sqrt(U), angle ~ U[0, 2π]
     r = radius * np.sqrt(rng.uniform(0.0, 1.0))
     angle = rng.uniform(0.0, 2*np.pi)
     offset = np.array([r*np.cos(angle), r*np.sin(angle)], dtype=float)
@@ -39,15 +39,15 @@ for k0 in range(K):
 print("Node Locations (GLOBAL, x,y):\n", nodes_xy)
 fig, ax = plt.subplots(figsize=(7, 7))
 
-# 参考坐标轴
+# (x,y) 
 ax.axhline(0, linewidth=0.8)
 ax.axvline(0, linewidth=0.8)
 
-# ULA（jammer 所在）位置
+# ULA location
 ax.scatter([jammer_location[0]], [jammer_location[1]],
            marker='s', s=100, label='ULA (jammer center)')
 
-# real / fake 节点（按 nodes_xy 的拆分方式：前 d_r 是 real，后 d_f 是 fake）
+# real / fake node ( nodes_xy ：previous 2 d_r is real，last one d_f is fake）
 real_location = nodes_xy[:d_r, :]
 fake_location = nodes_xy[d_r:, :]
 
@@ -56,7 +56,7 @@ ax.scatter(real_location[:, 0], real_location[:, 1],
 ax.scatter(fake_location[:, 0], fake_location[:, 1],
            marker='x', s=80, label=f'Fake (n={d_f})')
 
-# 随机圆区域边界（圆心 (Lroom, Wroom)，半径 R）
+# radius bound（center (Lroom, Wroom)， R is distance from center）
 theta = np.linspace(0, 2*np.pi, 256)
 circle_x = Lroom + radius * np.cos(theta)
 circle_y = Wroom + radius * np.sin(theta)
@@ -72,36 +72,36 @@ ax.legend(loc='best')
 plt.tight_layout()
 plt.show()
 
-# 1) 定义：全局 -> 阵列坐标（阵列=jammer 在 jammer_location）
+# 1) global cordinates
 ARRAY_CENTER_GLOBAL = np.array(jammer_location, dtype=float)
-ARRAY_YAW_DEG = 0.0  # 如果 ULA 不是沿全局 x 轴，填入偏航角（度）
+ARRAY_YAW_DEG = 0.0  # If ULA is not globle, shift to global
 
 def to_array_frame(points_xy, array_center=ARRAY_CENTER_GLOBAL, yaw_deg=ARRAY_YAW_DEG):
     pts = np.asarray(points_xy, dtype=float)                  # Nx2
-    pts_shift = pts - np.asarray(array_center)[None, :]       # 平移：阵列中心作为原点
+    pts_shift = pts - np.asarray(array_center)[None, :]       # Shift
     yaw = np.deg2rad(yaw_deg)
-    c, s = np.cos(-yaw), np.sin(-yaw)                         # 旋转：把 ULA 对齐到 x 轴
+    c, s = np.cos(-yaw), np.sin(-yaw)                         # Rotation: Align ULA to the x-axis
     Rm = np.array([[c, -s], [s,  c]])
-    return (pts_shift @ Rm.T)                                  # 返回阵列坐标系下的 (x', y')
+    return (pts_shift @ Rm.T)                                  # Return (x', y') in the array coordinate frame
 
-# 2) 把 real 的位置从“全局”变到“阵列坐标系”
+# 2) Convert real-node positions from global to array coordinate frame
 real_xy_array = to_array_frame(real_location)  # shape: (d_r, 2)
 
-# 3) 计算 AoA：θ = atan2(x', y') （注意是 atan2( x', y' )，broadside=+y）
+# 3) AoA computation: θ = atan2(x', y') (note: use atan2(x', y'), broadside = +y)
 #real_aoas = list(np.degrees(np.arctan2(real_xy_array[:, 0], real_xy_array[:, 1])))
-"注意，这里也可以直接来设置，比如 real_aoas = [20, 60]"
-# 4) 把 fake 的位置也变到“阵列坐标系”，并计算 real/fake 到阵列的距离
+"This can also be directly set, e.g., real_aoas = [20, 60]"
+# 4) Convert fake-node positions to the array frame and compute distances from the array for real/fake
 fake_xy_array = to_array_frame(fake_location)  # shape: (d_f, 2)
 
 # print("Real locations (ARRAY frame):\n", real_xy_array)
 # print("Real AoAs (deg) w.r.t. jammer ULA:", real_aoas)
 jammer_x, jammer_y = jammer_location
 
-# real 的直线距离（到 jammer/ULA 相位中心）
+# Direct distance of real nodes (to the jammer/ULA phase center)
 real_dist = np.hypot(real_location[:, 0] - jammer_x,
                      real_location[:, 1] - jammer_y)      # shape: (d_r,)
 
-# fake 的直线距离（d_f = 1）
+# Direct distance of fake nodes (d_f = 1)
 fake_dist = np.hypot(fake_location[:, 0] - jammer_x,
                          fake_location[:, 1] - jammer_y)   # shape: (d_f,)
 print("Real distances to ULA (m):", real_dist)
@@ -206,8 +206,11 @@ for _ in range(num_trials):
  #       best_fake_aoas = fake_aoas.copy()  # Save the best fake AoAs that maximize entropy
  #       music_spectrum_final = music_spectrum.copy()
  #       unnormalized_music_final = unnormalized_music.copy()
-    real_Peff = (real_power * np.ones_like(real_dist)) / np.maximum(real_dist, 1e-12)    # shape = (d_r,)
-    fake_Peff = (fake_power * np.ones_like(fake_dist)) / np.maximum(fake_dist, 1e-12)    # shape = (d_f,)
+    "pathloss 1/(d^2)"
+    real_Peff = (real_power * np.ones_like(real_dist)) / np.maximum(real_dist, 1e-12)**2
+    fake_Peff = (fake_power * np.ones_like(fake_dist)) / np.maximum(fake_dist, 1e-12)**2
+    #real_Peff = (real_power * np.ones_like(real_dist)) / np.maximum(real_dist, 1e-12)    # shape = (d_r,)
+    #fake_Peff = (fake_power * np.ones_like(fake_dist)) / np.maximum(fake_dist, 1e-12)    # shape = (d_f,)
     # print(real_Peff)
     # print(fake_Peff)
     # Compute covariance matrix with current fake AoAs
@@ -236,6 +239,7 @@ for _ in range(num_trials):
     fake_values = np.array(fake_values)
     #print(fake_values)
     fake_values /= np.sum(fake_values)  # Normalize for entropy
+
     entropy_fake = compute_entropy(fake_values)
 
     # --- 3. Combined objective ---
@@ -391,7 +395,7 @@ plt.ylabel('Normalized Spectrum')
 plt.grid(True)
 plt.legend()
 plt.tight_layout()
-plt.show()
+#plt.show()
 
 # --- Plot Unnormalized MUSIC Spectrum ---
 
@@ -405,7 +409,7 @@ plt.ylabel('Pseudo-Spectrum Value')
 plt.grid(True)
 plt.legend()
 plt.tight_layout()
-plt.show()
+#plt.show()
 
 # ================================
 # === ADD-ON: Gym Environment  ===
@@ -418,7 +422,7 @@ except Exception as e:
     raise
 
 def _angles_to_obs(angles_deg):
-    """把 real_aoas 编成 [cos, sin, cos, sin, ...] 作为状态（最小可用）。"""
+    """Encode real_aoas as [cos, sin, cos, sin, ...] for state (minimal usable)."""
     cs = []
     for th in angles_deg:
         r = np.deg2rad(th)
@@ -427,24 +431,33 @@ def _angles_to_obs(angles_deg):
 
 def _window_entropy_at_theta(music_norm, theta_grid, theta, half_win=1):
     """
-    对单个假角周围 ±half_win 个网格点取一个小分布来计算熵；
-    d_f=1 时单点熵为0，这样能给奖励更多信息（可选，默认 half_win=1）。
+    Form a small distribution over ±half_win grid points around a single fake angle
+    to compute entropy; when d_f=1, the single-point entropy is 0, so this provides
+    more informative reward (optional, default half_win=1).
     """
-    #Music_norm 是归一化的MUSIC spectrum
-    #Theta是当前的fake AoA
+    # Music_norm is the normalized MUSIC spectrum
+    # Theta is the current fake AoA
+    # theta_grid is the scanning theta grid
+    # Windows number of grids, if half_win = 1, then set 3 windows
+
+    #find the index that is most near theta
     idx = int(np.argmin(np.abs(theta_grid - theta)))
+    #calculate windows index
     lo = max(0, idx - half_win)
     hi = min(len(theta_grid) - 1, idx + half_win)
+    #get the winds total MUSIC spectrum
     p = music_norm[lo:hi+1].astype(float)
+    #norm
     p = p / max(p.sum(), 1e-12)
     p = np.clip(p, 1e-12, None)
+    #calculate shannon entropy
     return -np.sum(p * np.log2(p))
 
 class FakeAoAEnv(gym.Env):
     """
-    单步环境：动作是在 theta_grid 上选一个假 AoA（离散动作）。
-    奖励 = -(real_peak_sum - lambda_weight_fake * entropy_fake_window)
-    其余所有物理与计算都直接复用已有的代码与变量。
+    Single-step environment: the action selects one fake AoA on theta_grid (discrete action).
+    Reward = -(real_peak_sum - lambda_weight_fake * entropy_fake_window).
+    All other physics and computations reuse existing code and variables.
     """
     metadata = {"render_modes": []}
 
@@ -463,15 +476,15 @@ class FakeAoAEnv(gym.Env):
         self.d_total = d_total
         self.sigma2 = sigma2
         self.real_aoas = list(real_aoas)
-        self.real_Peff = np.asarray(real_Peff)      # 已含 pathloss 的等效功率
-        self.fake_Peff = np.asarray(fake_Peff)      # 已含 pathloss 的等效功率
+        self.real_Peff = np.asarray(real_Peff)      # Equivalent power including pathloss
+        self.fake_Peff = np.asarray(fake_Peff)      # Equivalent power including pathloss
         self.d_over_lambda = d_over_lambda
         self.lambda_weight_fake = float(lambda_weight_fake)
         self.entropy_halfwin = int(entropy_halfwin)
 
-        # 动作 = 在网格上选索引
+        # action = choose an index on the grid
         self.action_space = spaces.Discrete(len(self.theta_grid))
-        # 状态 = [cos, sin]*d_r
+        # state = [cos, sin]*d_r
         obs_dim = 2 * len(self.real_aoas)
         self.observation_space = spaces.Box(low=-1.0, high=1.0,
                                             shape=(obs_dim,), dtype=np.float32)
@@ -482,11 +495,11 @@ class FakeAoAEnv(gym.Env):
         return obs, {}
 
     def step(self, action):
-        # 把离散索引 -> 假 AoA（本环境 d_f=1；若将来 d_f>1，可扩展为多动作）
+        # map discrete index -> fake AoA (currently d_f=1; can extend to multi-action if d_f>1)
         fake_theta = float(self.theta_grid[int(action)])
         fake_aoas = [fake_theta]
 
-        # 用 “已含 pathloss 的功率” 进入原 covariance 计算
+        # use "equivalent power including pathloss" in the original covariance computation
         R = compute_covariance_matrix(self.real_aoas, fake_aoas,
                                       self.M, self.sigma2,
                                       real_power=self.real_Peff,
@@ -494,32 +507,33 @@ class FakeAoAEnv(gym.Env):
         music = compute_music_spectrum(R, self.M, self.d_total, self.theta_grid)
         music_norm = music / np.sum(music)
 
-        # real_peaks 累加
+        # accumulate real_peaks
         real_peak_sum = 0.0
         for th in self.real_aoas:
             idx = int(np.argmin(np.abs(self.theta_grid - th)))
             real_peak_sum += float(music_norm[idx])
 
-        # 假角的“窗口熵”（给 d_f=1 时的熵一丢丢可辨识度；可把 halfwin=0 退化回原始单点）
+        # "window entropy" around the fake angle (gives some discriminability when d_f=1; set halfwin=0 to revert)
+       
         entropy_fake = _window_entropy_at_theta(music_norm, self.theta_grid,
                                                 fake_theta, half_win=self.entropy_halfwin)
 
         objective = real_peak_sum - self.lambda_weight_fake * entropy_fake
-        reward = -objective  # 想最大化 -> 负号
+        reward = -objective  # maximize -> negative sign
 
         obs = _angles_to_obs(self.real_aoas)
         info = dict(fake_aoa=fake_theta,
                     real_peak_sum=real_peak_sum,
                     entropy_fake=entropy_fake,
                     objective=objective)
-        terminated = True   # 单步任务：选一次角度就结束
+        terminated = True   # single-step task: episode ends after one selection
         truncated  = False
         return obs, reward, terminated, truncated, info
 
-# 1) 复用已计算好的 real_Peff / fake_Peff（含 pathloss），以及 real_aoas 等
-#    注意：real_Peff, fake_Peff 是在上面的随机搜索循环里计算的，
-real_Peff_env = (1.0 * np.ones_like(real_dist)) / np.maximum(real_dist, 1e-12)  # 等同循环内的写法
-fake_Peff_env = (1.0 * np.ones_like(fake_dist)) / np.maximum(fake_dist, 1e-12)
+# 1) Reuse the already computed real_Peff / fake_Peff (including pathloss), and real_aoas, etc.
+#    Note: real_Peff, fake_Peff were computed in the random-search loop above.
+real_Peff_env = (1.0 * np.ones_like(real_dist)) / np.maximum(real_dist, 1e-12)**2
+fake_Peff_env = (1.0 * np.ones_like(fake_dist)) / np.maximum(fake_dist, 1e-12)**2
 
 env = FakeAoAEnv(theta_grid=theta_grid,
                  M=M, d_total=d_total, sigma2=sigma2,
@@ -530,7 +544,7 @@ env = FakeAoAEnv(theta_grid=theta_grid,
                  lambda_weight_fake=0.1,
                  entropy_halfwin=1)
 
-# 随机 agent demo：采 10 次动作看看 reward（可以换成 SB3 的 PPO/DDPG/TD3）
+# random agent demo: take 10 actions to see rewards (can be replaced by SB3 PPO/DDPG/TD3)
 for _ in range(10):
     obs, info = env.reset()
     a = env.action_space.sample()
