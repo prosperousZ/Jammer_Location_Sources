@@ -72,6 +72,26 @@ ax.legend(loc='best')
 plt.tight_layout()
 plt.show()
 
+T= 100
+dt = 1
+v_max = 1.0
+speeds = rng.uniform(0.0, v_max, size=K)          # 每个节点一个速度标量
+directions = rng.uniform(0.0, 2*np.pi, size=K)    # 每个节点的运动方向
+vel_xy = np.stack([speeds * np.cos(directions),
+                   speeds * np.sin(directions)], axis=1)  # shape = (K, 2)
+
+# 生成轨迹: positions[t, k, :] 表示 t 时刻第 k 个节点的 (x,y)
+traj_xy = np.zeros((T, K, 2), dtype=float)
+for t in range(T):
+    traj_xy[t, :, :] = nodes_xy + vel_xy * (t * dt)
+
+# 拆成 real / fake 的轨迹
+real_traj_xy = traj_xy[:, :d_r, :]   # shape = (T, d_r, 2)
+fake_traj_xy = traj_xy[:, d_r:, :]   # shape = (T, d_f, 2)
+
+print("real_traj_xy shape:", real_traj_xy.shape)
+print("fake_traj_xy shape:", fake_traj_xy.shape)
+
 # 1) global cordinates
 ARRAY_CENTER_GLOBAL = np.array(jammer_location, dtype=float)
 ARRAY_YAW_DEG = 0.0  # If ULA is not globle, shift to global
@@ -97,22 +117,90 @@ fake_xy_array = to_array_frame(fake_location)  # shape: (d_f, 2)
 # print("Real AoAs (deg) w.r.t. jammer ULA:", real_aoas)
 jammer_x, jammer_y = jammer_location
 
-# Direct distance of real nodes (to the jammer/ULA phase center)
-real_dist = np.hypot(real_location[:, 0] - jammer_x,
-                     real_location[:, 1] - jammer_y)      # shape: (d_r,)
+# # Direct distance of real nodes (to the jammer/ULA phase center)
+# real_dist = np.hypot(real_location[:, 0] - jammer_x,
+#                      real_location[:, 1] - jammer_y)      # shape: (d_r,)
 
-# Direct distance of fake nodes (d_f = 1)
-fake_dist = np.hypot(fake_location[:, 0] - jammer_x,
-                         fake_location[:, 1] - jammer_y)   # shape: (d_f,)
-print("Real distances to ULA (m):", real_dist)
-print("Fake distances to ULA (m):", fake_dist)
+# # Direct distance of fake nodes (d_f = 1)
+# fake_dist = np.hypot(fake_location[:, 0] - jammer_x,
+#                          fake_location[:, 1] - jammer_y)   # shape: (d_f,)
+
+# 距离: dist[t, i] = t 时刻第 i 个 real 到 jammer 的距离
+real_dist_t = np.zeros((T, d_r), dtype=float)
+fake_dist_t = np.zeros((T, d_f), dtype=float)
+
+for t in range(T):
+    # t 时刻 real 的位置
+    real_xy_t = real_traj_xy[t, :, :]   # shape (d_r, 2)
+    fake_xy_t = fake_traj_xy[t, :, :]   # shape (d_f, 2)
+
+    real_dist_t[t, :] = np.hypot(real_xy_t[:, 0] - jammer_x,
+                                 real_xy_t[:, 1] - jammer_y)
+    fake_dist_t[t, :] = np.hypot(fake_xy_t[:, 0] - jammer_x,
+                                 fake_xy_t[:, 1] - jammer_y)
+
+# print("Real distances to ULA (m):", real_dist)
+# print("Fake distances to ULA (m):", fake_dist)
 print("Real aoa",real_aoas)
 
 real_power = 1.0  # Power of each real source
 fake_power = 1.0  # Power of each fake source
+real_Peff_t = (real_power * np.ones_like(real_dist_t)) / np.maximum(real_dist_t, 1e-12)**2
+fake_Peff_t = (fake_power * np.ones_like(fake_dist_t)) / np.maximum(fake_dist_t, 1e-12)**2
+real_Peff = real_Peff_t[0, :]  # Take the first time step for static power
+fake_Peff = fake_Peff_t[0, :]  # Take the first time step for static power
+print("real_Peff_t shape:", real_Peff_t.shape)   # (T, d_r)
+print("fake_Peff_t shape:", fake_Peff_t.shape)   # (T, d_f)
+T = real_traj_xy.shape[0]
 
+plt.figure(figsize=(7, 7))
+
+# 画 jammer 位置
+plt.scatter([jammer_location[0]], [jammer_location[1]],
+            marker='s', s=120, label='ULA (jammer)', zorder=5)
+
+# 画 real 节点轨迹
+for i in range(d_r):
+    x = real_traj_xy[:, i, 0]
+    y = real_traj_xy[:, i, 1]
+
+    # 轨迹线
+    plt.plot(x, y, '-', alpha=0.8, label=f'Real {i} traj')
+
+    # 起点
+    plt.scatter(x[0], y[0], c='C0', marker='o', s=60, zorder=6)
+    plt.text(x[0], y[0], ' Start', fontsize=9, ha='left', va='bottom')
+
+    # 终点
+    plt.scatter(x[-1], y[-1], c='C0', marker='x', s=80, zorder=6)
+    plt.text(x[-1], y[-1], ' End', fontsize=9, ha='left', va='bottom')
+
+# 画 fake 节点轨迹
+for j in range(d_f):
+    x = fake_traj_xy[:, j, 0]
+    y = fake_traj_xy[:, j, 1]
+
+    # 轨迹线（虚线区分）
+    plt.plot(x, y, '--', alpha=0.8, label=f'Fake {j} traj')
+
+    # 起点
+    plt.scatter(x[0], y[0], c='C1', marker='^', s=60, zorder=6)
+    plt.text(x[0], y[0], ' Start', fontsize=9, ha='left', va='bottom')
+
+    # 终点
+    plt.scatter(x[-1], y[-1], c='C1', marker='v', s=60, zorder=6)
+    plt.text(x[-1], y[-1], ' End', fontsize=9, ha='left', va='bottom')
+
+plt.xlabel('x (m)')
+plt.ylabel('y (m)')
+plt.title('Real / Fake Trajectories (Start & End Marked)')
+plt.grid(True)
+plt.axis('equal')
+plt.legend()
+plt.tight_layout()
+plt.show()
+"----------------------------------------------------------------------------"
 # --- Helper Functions ---
-
 def steering_vector(theta, M, d_over_lambda=0.5):
     """Compute the array steering vector for a given angle theta."""
     m = np.arange(M)  # Antenna element indices: 0,1,...,M-1
@@ -207,8 +295,6 @@ for _ in range(num_trials):
  #       music_spectrum_final = music_spectrum.copy()
  #       unnormalized_music_final = unnormalized_music.copy()
     "pathloss 1/(d^2)"
-    real_Peff = (real_power * np.ones_like(real_dist)) / np.maximum(real_dist, 1e-12)**2
-    fake_Peff = (fake_power * np.ones_like(fake_dist)) / np.maximum(fake_dist, 1e-12)**2
     #real_Peff = (real_power * np.ones_like(real_dist)) / np.maximum(real_dist, 1e-12)    # shape = (d_r,)
     #fake_Peff = (fake_power * np.ones_like(fake_dist)) / np.maximum(fake_dist, 1e-12)    # shape = (d_f,)
     # print(real_Peff)
@@ -532,8 +618,9 @@ class FakeAoAEnv(gym.Env):
 
 # 1) Reuse the already computed real_Peff / fake_Peff (including pathloss), and real_aoas, etc.
 #    Note: real_Peff, fake_Peff were computed in the random-search loop above.
-real_Peff_env = (1.0 * np.ones_like(real_dist)) / np.maximum(real_dist, 1e-12)**2
-fake_Peff_env = (1.0 * np.ones_like(fake_dist)) / np.maximum(fake_dist, 1e-12)**2
+real_Peff_env = real_Peff_t[0, :]  # Take the first time step for static power
+fake_Peff_env = fake_Peff_t[0, :]  # Take the first time step for static power
+
 
 env = FakeAoAEnv(theta_grid=theta_grid,
                  M=M, d_total=d_total, sigma2=sigma2,
