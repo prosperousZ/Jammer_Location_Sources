@@ -308,9 +308,9 @@ class FakeLocationEnv(gym.Env):
             fake_values.append(music_norm[idx])
         fake_values = np.array(fake_values)
         fake_values /= np.sum(fake_values)
-        print(fake_values)
+  
         entropy_fake = compute_entropy(fake_values)
-        print(entropy_fake)
+     
         objective = real_peak_sum - self.lambda_weight_fake * entropy_fake
         reward = -objective
         self.reward.append(reward)
@@ -373,7 +373,7 @@ from stable_baselines3.common.callbacks import BaseCallback
 n_actions = env.action_space.shape[0]
 action_noise = NormalActionNoise(
     mean=np.zeros(n_actions),
-    sigma=0.5 * np.ones(n_actions)
+    sigma=0.05 * np.ones(n_actions)
 )
 # ==== Callback：每一个 time step 打印 reward ====
 class PrintStepCallback(BaseCallback):
@@ -415,3 +415,4 @@ model.learn(total_timesteps=10000)
 fake_traj_all = np.array(env.fake_traj_current, dtype=float)
 np.save("fake_traj_all.npy", fake_traj_all)
 np.save("train_rewards.npy", np.array(env.reward))  # 保存训练过程中每一步的 reward
+
